@@ -51,20 +51,38 @@ func (s *ProxyServiceImpl) HandleRequest(req *domain.Request) (*domain.Response,
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(strings.ToLower(contentType), "text/event-stream") {
 		var buffer bytes.Buffer
-		tempBuf := make([]byte, 1024)
+		tempBuf := make([]byte, 32*1024)
 
-		// Set a read deadline
-		resp.Body.(interface{ SetReadDeadline(time.Time) error }).SetReadDeadline(time.Now().Add(3 * time.Second))
+		// Read what we can within the timeout without depending on
+		// the concrete type of resp.Body (avoid unsafe type assertions).
+		// We spawn a reader goroutine and use a timeout to stop waiting
+		// for initial SSE bytes. No explicit cap on buffer size (user
+		// requested unlimited buffering). The deadline is set to 5 minutes.
 
-		// Read what we can within the timeout
-		for buffer.Len() < 2048 { // Limit to 2KB for logging
-			n, err := resp.Body.Read(tempBuf)
-			if n > 0 {
-				buffer.Write(tempBuf[:n])
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for {
+				n, err := resp.Body.Read(tempBuf)
+				if n > 0 {
+					buffer.Write(tempBuf[:n])
+				}
+				if err != nil {
+					// EOF or read error -> stop reading
+					return
+				}
 			}
-			if err != nil {
-				break // EOF or timeout
-			}
+		}()
+
+		select {
+		case <-done:
+			// finished reading (EOF)
+		case <-time.After(5 * time.Minute):
+			// timeout after 5 minutes: close the body to unblock reader
+			// and wait for goroutine to exit. Closing the body is the
+			// safest portable way to interrupt the blocking Read.
+			resp.Body.Close()
+			<-done
 		}
 
 		body := buffer.Bytes()
