@@ -23,7 +23,7 @@ const (
 	colorBlue   = "\033[34m"
 	colorPurple = "\033[35m"
 	colorCyan   = "\033[36m"
-	colorWhite  = "\033[37m"
+	// colorWhite  = "\033[37m"
 )
 
 var colors = []string{colorRed, colorGreen, colorYellow, colorBlue, colorPurple, colorCyan}
