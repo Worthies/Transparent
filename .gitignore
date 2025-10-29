@@ -33,3 +33,5 @@ go.work.sum
 transparent
 sse-server
 proxy.log
+**/[0-9]*_*.txt
+**/*-ca.*

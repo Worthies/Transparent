@@ -7,9 +7,11 @@ import (
 
 // ProxyService handles the core proxy logic
 type ProxyService interface {
-	HandleRequest(req *Request) (*Response, error)
+	HandleRequest(req *Request, id string) (*Response, error)
+	HandleStreamingRequest(req *Request, id string) (*StreamingResponse, error)
 	InspectRequest(req *Request) *InspectionResult
 	InspectResponse(resp *Response) *InspectionResult
+	SaveRequestResponse(serial string, req *Request, resp *Response)
 }
 
 // TLSCertificateService handles TLS certificate generation for MITM

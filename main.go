@@ -19,7 +19,9 @@ func main() {
 	}()
 
 	var listenAddr string
+	var enableKeepAlive bool
 	flag.StringVar(&listenAddr, "listen", ":8080", "Address to listen on")
+	flag.BoolVar(&enableKeepAlive, "keep-alive", false, "Enable HTTP keep-alive for TLS connections (reuse connections). Default: false (safer, close after each request)")
 	flag.Parse()
 
 	// Set up logging
@@ -27,6 +29,15 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+
+	// Log configuration
+	if enableKeepAlive {
+		fmt.Println("[CONFIG] HTTP Keep-Alive: ENABLED (performance mode - reuses connections)")
+		fmt.Println("[CONFIG] Warning: May cause issues with non-compliant HTTP implementations")
+	} else {
+		fmt.Println("[CONFIG] HTTP Keep-Alive: DISABLED (safe mode - closes after each request)")
+		fmt.Println("[CONFIG] Use -keep-alive flag to enable connection reuse for better performance")
+	}
 
 	// Initialize infrastructure services
 	proxySvc := infrastructure.NewProxyService()
@@ -39,8 +50,10 @@ func main() {
 	// Initialize application service
 	appSvc := application.NewProxyApplicationService(proxySvc, tlsSvc)
 
-	// Create HTTP server service
-	httpSvc := infrastructure.NewHTTPServerService(appSvc)
+	// Create HTTP server service with configuration
+	httpSvc := infrastructure.NewHTTPServerServiceWithConfig(appSvc, &infrastructure.HTTPServerConfig{
+		EnableKeepAlive: enableKeepAlive,
+	})
 
 	// Start the proxy
 	slog.Info("Starting Transparent proxy", "address", listenAddr)

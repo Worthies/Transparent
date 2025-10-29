@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"io"
 	"net/http"
 	"time"
 )
@@ -22,6 +23,14 @@ type Response struct {
 	StatusCode int
 	Headers    http.Header
 	Body       []byte
+	Timestamp  time.Time
+}
+
+// StreamingResponse represents a streaming HTTP response
+type StreamingResponse struct {
+	StatusCode int
+	Headers    http.Header
+	BodyReader io.ReadCloser // Stream the body instead of buffering
 	Timestamp  time.Time
 }
 

@@ -29,7 +29,7 @@ func TestProxyServiceImpl_HandleRequest(t *testing.T) {
 	}
 
 	// Handle request
-	resp, err := proxySvc.HandleRequest(req)
+	resp, err := proxySvc.HandleRequest(req, "00000001")
 	if err != nil {
 		t.Fatalf("HandleRequest failed: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestProxyServiceImpl_HandleRequestWithBody(t *testing.T) {
 	}
 
 	// Handle request
-	resp, err := proxySvc.HandleRequest(req)
+	resp, err := proxySvc.HandleRequest(req, "00000001")
 	if err != nil {
 		t.Fatalf("HandleRequest failed: %v", err)
 	}

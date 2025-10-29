@@ -2,6 +2,7 @@ package application
 
 import (
 	"crypto/tls"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,11 +14,22 @@ import (
 
 type mockProxyService struct{}
 
-func (m *mockProxyService) HandleRequest(req *domain.Request) (*domain.Response, error) {
+func (m *mockProxyService) HandleRequest(req *domain.Request, id string) (*domain.Response, error) {
 	return &domain.Response{
 		StatusCode: 200,
 		Headers:    http.Header{"Content-Type": []string{"application/json"}},
 		Body:       []byte(`{"status": "ok"}`),
+		Timestamp:  time.Now(),
+	}, nil
+}
+
+func (m *mockProxyService) HandleStreamingRequest(req *domain.Request, id string) (*domain.StreamingResponse, error) {
+	// Return a streaming response with a string reader
+	body := strings.NewReader(`{"status": "ok"}`)
+	return &domain.StreamingResponse{
+		StatusCode: 200,
+		Headers:    http.Header{"Content-Type": []string{"application/json"}},
+		BodyReader: io.NopCloser(body),
 		Timestamp:  time.Now(),
 	}, nil
 }
@@ -28,6 +40,10 @@ func (m *mockProxyService) InspectRequest(req *domain.Request) *domain.Inspectio
 
 func (m *mockProxyService) InspectResponse(resp *domain.Response) *domain.InspectionResult {
 	return &domain.InspectionResult{Response: resp, Blocked: false}
+}
+
+func (m *mockProxyService) SaveRequestResponse(serial string, req *domain.Request, resp *domain.Response) {
+	// Mock implementation - do nothing
 }
 
 type mockTLSCertService struct{}
