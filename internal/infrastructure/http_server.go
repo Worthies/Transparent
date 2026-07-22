@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/worthies/transparent/internal/application"
 )
@@ -220,12 +223,100 @@ func (w *tlsResponseWriter) Flush() {
 	}
 }
 
-// Start starts the HTTP server
+// Start starts the proxy using a raw net.Listener so CONNECT tunnels work
+// reliably across all Go versions. Incoming raw bytes are logged to
+// /tmp/proxy_raw_requests.log for debugging.
 func (s *HTTPServerServiceImpl) Start(addr string) error {
-	server := &http.Server{
-		Addr:    addr,
-		Handler: s,
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return err
+		}
+		go s.handleRawConn(conn)
+	}
+}
+
+func (s *HTTPServerServiceImpl) handleRawConn(conn net.Conn) {
+	defer conn.Close()
+	peer := conn.RemoteAddr().String()
+
+	// Peek at the first bytes the client sends.
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 512)
+	n, _ := conn.Read(buf)
+	conn.SetReadDeadline(time.Time{})
+
+	if n > 0 {
+		f, _ := os.OpenFile("/tmp/proxy_raw.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if f != nil {
+			fmt.Fprintf(f, "\n=== %s @ %s ===\n%s\n", peer, time.Now().Format(time.RFC3339), string(buf[:n]))
+			f.Close()
+		}
+		// If it's not HTTP, bail.
+		if n < 4 || !strings.HasPrefix(string(buf[:n]), "CONN") && !strings.HasPrefix(string(buf[:n]), "GET ") &&
+			!strings.HasPrefix(string(buf[:n]), "POST") && !strings.HasPrefix(string(buf[:n]), "HEAD") &&
+			!strings.HasPrefix(string(buf[:n]), "PUT ") && !strings.HasPrefix(string(buf[:n]), "DELETE") &&
+			!strings.HasPrefix(string(buf[:n]), "OPTI") && !strings.HasPrefix(string(buf[:n]), "PATC") {
+			fmt.Fprintf(os.Stderr, "[proxy] non-HTTP from %s: %q\n", peer, string(buf[:min(n, 100)]))
+			conn.Write([]byte("HTTP/1.1 501 Not Implemented\r\n\r\n"))
+			return
+		}
 	}
 
-	return server.ListenAndServe()
+	// Rebuild the reader with the peeked bytes + the rest of the conn.
+	reader := bufio.NewReader(io.MultiReader(strings.NewReader(string(buf[:n])), conn))
+	for {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+		rw := &connResponseWriter{conn: conn}
+		s.ServeHTTP(rw, req)
+		if !s.config.EnableKeepAlive {
+			return
+		}
+		if strings.EqualFold(req.Header.Get("Connection"), "close") {
+			return
+		}
+	}
+}
+
+// connResponseWriter is a minimal http.ResponseWriter + http.Hijacker.
+type connResponseWriter struct {
+	conn        net.Conn
+	header      http.Header
+	wroteHeader bool
+}
+
+func (w *connResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *connResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	statusText := http.StatusText(statusCode)
+	if statusText == "" {
+		statusText = "Unknown"
+	}
+	fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", statusCode, statusText)
+	w.header.Write(w.conn)
+	fmt.Fprintf(w.conn, "\r\n")
+}
+func (w *connResponseWriter) Write(data []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.conn.Write(data)
+}
+func (w *connResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.conn, bufio.NewReadWriter(bufio.NewReader(w.conn), bufio.NewWriter(w.conn)), nil
 }

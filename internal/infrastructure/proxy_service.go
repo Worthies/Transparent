@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -304,7 +305,17 @@ func (s *ProxyServiceImpl) buildFileData(serial string, req *domain.Request, res
 		}
 	}
 	buf.WriteString("\n--- Response Body ---\n")
-	buf.Write(resp.Body)
+	body := resp.Body
+	// Attempt gunzip if the response is gzip-compressed.
+	if strings.EqualFold(resp.Headers.Get("Content-Encoding"), "gzip") {
+		if r, err := gzip.NewReader(bytes.NewReader(body)); err == nil {
+			if decompressed, err := io.ReadAll(r); err == nil {
+				body = decompressed
+			}
+			r.Close()
+		}
+	}
+	buf.Write(body)
 	buf.WriteString("\n")
 
 	// Make a copy of the data (buffer will be returned to pool)
